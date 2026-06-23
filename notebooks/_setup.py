@@ -1,3 +1,5 @@
+# Converted from _setup.ipynb
+# --- Code cell [0] ---
 """Path bootstrap for lab notebooks.
 
 Resolves the repo root (where `app/`, `scripts/`, `data/` live) regardless of
@@ -11,9 +13,12 @@ is stable; cwd is not.
 """
 from __future__ import annotations
 
+# --- Code cell [1] ---
 import sys
 from pathlib import Path
 
+# --- Code cell [2] ---
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+

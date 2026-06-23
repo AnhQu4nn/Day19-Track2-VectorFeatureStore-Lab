@@ -1,21 +1,16 @@
-# ---
-# jupyter:
-#   jupytext:
-#     formats: py:percent
-# ---
-
-# %% [markdown]
+# Converted from 02_hybrid_search_rrf.ipynb
+# --- Markdown cell ---
 # # NB2 — Hybrid Search: BM25 + Vector + RRF
-#
+# 
 # **Stack:** `rank-bm25` cho BM25 sparse + `qdrant-client` cho dense + RRF fusion.
 # Maps to slide §3 (Hybrid Search Mechanics) + deliverable bullet 2.
-#
+# 
 # > Trong sản xuất 2026, hybrid search (BM25 + Vector + RRF $k=60$) đạt 91%
 # > Recall@10 vs 78% cho dense-only — đó là lý do mọi vector DB lớn (Qdrant,
 # > Weaviate, OpenSearch, Elasticsearch) đều có hybrid built-in. Notebook này
 # > implement nó từ đầu để hiểu *vì sao* nó thắng.
 
-# %%
+# --- Code cell [1] ---
 import _setup  # noqa: F401
 import json
 import statistics
@@ -28,10 +23,10 @@ from rank_bm25 import BM25Okapi
 
 DATA = Path(_setup.__file__).resolve().parent.parent / "data"
 
-# %% [markdown]
+# --- Markdown cell ---
 # ## 1. Reload corpus + build both indices
 
-# %%
+# --- Code cell [3] ---
 docs = [json.loads(line) for line in (DATA / "corpus_vn.jsonl").open(encoding="utf-8")]
 
 # BM25
@@ -59,10 +54,10 @@ for start in range(0, len(docs), BATCH):
 client.upsert(collection_name="lab19", points=points)
 print(f"BM25 + vector indices ready ({len(docs)} docs)")
 
-# %% [markdown]
+# --- Markdown cell ---
 # ## 2. Per-mode search functions
 
-# %%
+# --- Code cell [5] ---
 TOP_K = 10
 RRF_K = 60   # standard default — see slide §3
 
@@ -78,22 +73,21 @@ def search_semantic(query: str, top_k: int = TOP_K) -> list[str]:
     res = client.query_points(collection_name="lab19", query=q_vec, limit=top_k)
     return [p.payload["doc_id"] for p in res.points]
 
-
-# %% [markdown]
+# --- Markdown cell ---
 # ## 3. TODO — implement Reciprocal Rank Fusion
-#
+# 
 # Công thức (deck §3):
-#
+# 
 # $$\text{score}(d) = \sum_{r \in \text{retrievers}} \frac{1}{k + \text{rank}_r(d)}$$
-#
+# 
 # `rank_r(d)` là 1-based (vị trí đầu = 1, không phải 0). $k = 60$ là default công nghiệp.
-#
+# 
 # **Bước:**
 # 1. Pull top-50 từ BM25 và top-50 từ vector (depth = 5×top_k để có signal sâu).
 # 2. Cho mỗi doc, cộng `1 / (k + rank)` từ mỗi retriever (nếu doc không xuất hiện thì bỏ qua).
 # 3. Sort theo total score, trả về top-10 doc_id.
 
-# %%
+# --- Code cell [7] ---
 def search_hybrid(query: str, top_k: int = TOP_K, rrf_k: int = RRF_K) -> list[str]:
     depth = max(top_k * 5, 50)
     kw_ids = search_keyword(query, depth)
@@ -118,14 +112,14 @@ print(f"  keyword top-3:  {search_keyword(test_q)[:3]}")
 print(f"  semantic top-3: {search_semantic(test_q)[:3]}")
 print(f"  hybrid top-3:   {search_hybrid(test_q)[:3]}")
 
-# %% [markdown]
+# --- Markdown cell ---
 # ## 4. Đánh giá trên golden set (50 queries)
-#
+# 
 # Metric: **Precision@10** = fraction of top-10 thuộc đúng topic.
 # (Slide deck dùng "Recall@10" với 1-relevant-per-query setup khác — ở đây dùng
 # precision-style để có signal rõ với 100 docs/topic.)
 
-# %%
+# --- Code cell [9] ---
 golden = [json.loads(line) for line in (DATA / "golden_set.jsonl").open(encoding="utf-8")]
 doc_topic = {d["doc_id"]: d["topic"] for d in docs}
 
@@ -147,13 +141,13 @@ print(f"  Keyword (BM25)   : {statistics.mean(p_kw):.1%}")
 print(f"  Semantic (vector): {statistics.mean(p_sem):.1%}")
 print(f"  Hybrid  (RRF=60) : {statistics.mean(p_hyb):.1%}   <- should win")
 
-# %% [markdown]
+# --- Markdown cell ---
 # ## 5. Slice theo loại query
-#
+# 
 # Golden set có 3 loại: `exact` (BM25 ưu thế), `paraphrase` (vector ưu thế),
 # `mixed` (hybrid ưu thế). In separate scores để thấy *tại sao* hybrid thắng.
 
-# %%
+# --- Code cell [11] ---
 from collections import defaultdict
 
 by_type: dict[str, dict[str, list[float]]] = defaultdict(lambda: {"kw": [], "sem": [], "hyb": []})
@@ -170,9 +164,9 @@ for t in ("exact", "paraphrase", "mixed"):
           f"{statistics.mean(m['sem']):>6.1%} "
           f"{statistics.mean(m['hyb']):>6.1%}")
 
-# %% [markdown]
+# --- Markdown cell ---
 # ### Diễn giải kết quả
-#
+# 
 # - `exact` queries chứa từ kỹ thuật verbatim trong corpus → BM25 mạnh, hybrid
 #   thường ngang bằng (keyword signal đã đủ mạnh).
 # - `paraphrase` queries dùng từ Việt **không** xuất hiện verbatim trong docs
@@ -184,26 +178,27 @@ for t in ("exact", "paraphrase", "mixed"):
 # - `mixed` queries có cả từ exact + ý tưởng paraphrased → **hybrid thắng rõ**
 #   (~100% vs 97-98% pure modes). Đây là pattern production-relevant nhất
 #   vì user thật ít khi viết query 100% exact term hoặc 100% paraphrase.
-#
+# 
 # Hybrid thắng *trung bình* nhờ robust trên mọi kiểu query — đó là lý do
 # production luôn default hybrid (deck §3, slide "Hybrid Search Mechanics").
 
-# %% [markdown]
+# --- Markdown cell ---
 # ## Deliverable evidence
-#
+# 
 # 1. Output cell 4: bảng Precision@10 với 3 mode, hybrid > kw và > sem.
 # 2. Output cell 5: bảng slice theo loại query, exact/paraphrase/mixed.
-#
+# 
 # ---
-#
+# 
 # ## Vibe-coding callout
-#
+# 
 # **Delegate freely:** the per-mode search wrapper functions in §2. AI nailed
 # the pattern in 1 shot. Cũng AI tốt cho việc set up bảng kết quả (`statistics.mean`,
 # format `{:.1%}`) — chỉ cần spec rõ output schema.
-#
+# 
 # **Think hard yourself:** the RRF formula. Trước khi implement, hỏi AI giải
 # thích RRF rồi cross-check với deck §3. Nếu AI viết code mà rank bắt đầu từ 0
 # (không phải 1) hoặc cộng 1/rank thay vì 1/(k+rank), đã hỏng — và rất khó debug
 # về sau khi quality giảm. Đây là 1 ví dụ "AI write 5 dòng đúng đắn nhưng nếu
 # bạn không tự kiểm tra công thức, bug nằm im trong production".
+

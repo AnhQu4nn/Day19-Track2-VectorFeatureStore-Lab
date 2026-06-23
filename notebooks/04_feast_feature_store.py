@@ -1,22 +1,18 @@
-# ---
-# jupyter:
-#   jupytext:
-#     formats: py:percent
-# ---
-
-# %% [markdown]
+# Converted from 04_feast_feature_store.ipynb
+# --- Markdown cell ---
 # # NB4 — Feast Feature Store: 3 Feature Views
-#
+# 
 # **Stack:** Feast (LF AI&Data 2024+) + SQLite online store + Parquet offline.
 # Maps to slide §6 (Feast Feature Store) + deliverable bullet 3.
-#
+# 
 # > Mục tiêu: định nghĩa 3 feature views, sinh dữ liệu vào offline store
 # > (Parquet), `materialize` sang online store (SQLite), gọi
 # > `get_online_features` < 10ms — đó là lookup latency rubric.
 
-# %%
+# --- Code cell [1] ---
 import _setup  # noqa: F401
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -26,14 +22,15 @@ REPO_ROOT = Path(_setup.__file__).resolve().parent.parent
 FEAST_DIR = REPO_ROOT / "app" / "feast_repo"
 FEAST_DATA = FEAST_DIR / "data"
 FEAST_DATA.mkdir(exist_ok=True)
+FEAST_CLI = [sys.executable, "-c", "from feast.cli.cli import cli; raise SystemExit(cli())"]
 
-# %% [markdown]
+# --- Markdown cell ---
 # ## 1. Sinh dữ liệu offline (Parquet) cho 3 feature views
-#
+# 
 # Trong production, dữ liệu này sẽ đến từ data warehouse (BigQuery/Snowflake/Delta).
 # Ở lab, sinh từ corpus + synthetic user activity để học pattern materialize.
 
-# %%
+# --- Code cell [3] ---
 NOW = datetime.now(timezone.utc).replace(microsecond=0)
 
 
@@ -76,15 +73,15 @@ print(f"Wrote 3 Parquet sources to {FEAST_DATA}")
 for p in sorted(FEAST_DATA.glob("*.parquet")):
     print(f"  {p.name}  {p.stat().st_size/1024:.1f} KB")
 
-# %% [markdown]
+# --- Markdown cell ---
 # ## 2. `feast apply` — register 3 feature views với metadata registry
-#
+# 
 # `app/feast_repo/feature_views.py` đã định nghĩa 3 feature views (xem file đó).
 # Chạy `feast apply` để Feast đọc file definition và ghi vào `registry.db`.
 
-# %%
+# --- Code cell [5] ---
 res = subprocess.run(
-    ["feast", "apply"],
+    FEAST_CLI + ["apply"],
     cwd=str(FEAST_DIR),
     capture_output=True, text=True, check=False,
 )
@@ -95,16 +92,16 @@ if res.stderr:
     print(res.stderr)
 assert res.returncode == 0, f"feast apply failed: {res.stderr}"
 
-# %% [markdown]
+# --- Markdown cell ---
 # ## 3. `feast materialize-incremental` — load offline → online
-#
+# 
 # Feast scan offline store cho mọi sự kiện đến `now`, ghi giá trị mới nhất
 # (per entity_key) vào online store. SQLite trong lite path; Redis trong docker path.
 
-# %%
+# --- Code cell [7] ---
 end_dt = NOW.strftime("%Y-%m-%dT%H:%M:%S")
 res = subprocess.run(
-    ["feast", "materialize-incremental", end_dt],
+    FEAST_CLI + ["materialize-incremental", end_dt],
     cwd=str(FEAST_DIR),
     capture_output=True, text=True, check=False,
 )
@@ -114,14 +111,14 @@ if res.stderr:
     print(res.stderr[-500:])
 assert res.returncode == 0, f"materialize failed: {res.stderr}"
 
-# %% [markdown]
+# --- Markdown cell ---
 # ## 4. Online lookup — đo latency
-#
+# 
 # `get_online_features()` query online store cho 1 batch entity rows.
 # Rubric threshold: P99 < 10ms cho lookup khi online store là SQLite local
 # (Redis/Dynamo trong production sẽ < 5ms).
 
-# %%
+# --- Code cell [9] ---
 import time
 
 from feast import FeatureStore
@@ -146,10 +143,10 @@ single_latency_ms = (time.perf_counter() - t0) * 1000
 print(f"Single lookup: {single_latency_ms:.2f}ms")
 print({k: v[0] for k, v in features.items()})
 
-# %% [markdown]
+# --- Markdown cell ---
 # ## 5. TODO — Batch latency benchmark (100 lookups, P99)
 
-# %%
+# --- Code cell [11] ---
 latencies: list[float] = []
 for i in range(100):
     user_id = f"u_{i:03d}"
@@ -174,14 +171,14 @@ if p99 < 10:
 else:
     print(f"WARN — P99 = {p99:.2f}ms (SQLite trên macOS thường tốt hơn 5ms; Linux thường tốt hơn 1ms)")
 
-# %% [markdown]
+# --- Markdown cell ---
 # ## 6. PIT join (offline) — đảm bảo no data leakage
-#
+# 
 # `get_historical_features` thực hiện Point-in-Time join: cho mỗi event row
 # `(user_id, ts)`, lấy feature value tại ts đó (không dùng giá trị tương lai).
 # Đây là cơ chế chính để tránh training-serving skew (deck §6).
 
-# %%
+# --- Code cell [13] ---
 import pandas as pd
 entity_df = pd.DataFrame({
     "user_id": ["u_001", "u_002", "u_003"],
@@ -197,24 +194,24 @@ historical = fs.get_historical_features(
 ).to_df()
 print(historical)
 
-# %% [markdown]
+# --- Markdown cell ---
 # ## Deliverable evidence
-#
+# 
 # 1. Output cell 2: 3 Parquet files generated.
 # 2. Output cell 3: `feast apply` STDOUT showing "Created feature view <name>" × 3.
 # 3. Output cell 4: `materialize` log showing rows materialized to online store.
 # 4. Output cell 5: 1 online lookup result + latency.
 # 5. Output cell 6: 100-lookup P50/P95/P99 + PASS line.
 # 6. Output cell 7: PIT join DataFrame (3 rows × features).
-#
+# 
 # ---
-#
+# 
 # ## Vibe-coding callout
-#
+# 
 # **Delegate freely:** Feast feature view YAML / Python definitions follow strict
 # patterns (entity → source → schema). AI nails this in 1 shot if you give it
 # the schema. Cũng AI tốt cho synthetic data generators (`make_user_profile`).
-#
+# 
 # **Think hard yourself:** **TTL choices** trong feature_views.py — tại sao
 # `user_profile_features` TTL=30 ngày nhưng `query_velocity_features` TTL=1 giờ?
 # Nếu sai TTL: query_velocity với TTL=30d sẽ trả giá trị cũ → fraud detection
